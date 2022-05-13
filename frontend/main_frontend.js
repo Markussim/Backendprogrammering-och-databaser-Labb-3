@@ -7,8 +7,27 @@ socket.on("connect", () => {
 });
 
 socket.on("new_question", (question) => {
-  console.log(question);
   document.querySelector("#question").innerHTML = question.question;
+});
+
+socket.on("top_list", (topList) => {
+  console.log(topList);
+  document.querySelector("#top_list").innerHTML = "";
+  topList.forEach((element) => {
+    const li = document.createElement("li");
+    li.innerHTML = element.userName + ": " + element.numberOfCorrectAnswers;
+    document.querySelector("#top_list").appendChild(li);
+  });
+});
+
+socket.on("wrong_answer", (userName) => {
+  if (userName == localStorage.getItem("userName")) {
+    alert("Wrong answer");
+  }
+});
+
+socket.on("chat_message", (message) => {
+  document.querySelector("#chat").innerText += message.message + "\n";
 });
 
 // When user clicks on the button
@@ -37,3 +56,13 @@ if (!userName) {
   const nameInput = prompt("What is your name?");
   localStorage.setItem("userName", nameInput);
 }
+
+// When user clicks send message
+document.querySelector("#send").addEventListener("click", () => {
+  const message = {
+    message: document.querySelector("#message").value,
+    userName: localStorage.getItem("userName"),
+  };
+  socket.emit("chat_message", message);
+  document.querySelector("#message").value = "";
+});

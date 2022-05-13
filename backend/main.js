@@ -4,6 +4,7 @@ const port = 3000;
 const cors = require("cors");
 const ip = require("ip");
 const http = require("http");
+const { MongoClient } = require("mongodb");
 
 const server = http.createServer(app);
 
@@ -11,25 +12,40 @@ const io = require("socket.io")(server);
 
 let question = generateQuestion();
 
-let answers = [];
+const client = new MongoClient("mongodb://localhost:27017");
+client.connect();
+const db = client.db("quiz");
 
 io.on("connection", (socket) => {
   console.log("New client connected");
   socket.on("disconnect", () => {
     console.log("Client disconnected");
   });
-  socket.on("new_question", () => {
+  socket.on("new_question", async () => {
     console.log("New question");
     io.emit("new_question", question);
+    let numberOfEntries = await getNumberOfEntries();
+    console.log(numberOfEntries);
+    io.emit("top_list", numberOfEntries);
   });
 
-  socket.on("answer", (answer) => {
+  socket.on("answer", async (answer) => {
     if (answer.answer == question.answer) {
-      answers.push(answer);
       question = generateQuestion();
       io.emit("new_question", question);
-      console.log(getNumberOfEntries(answers));
+      await db.collection("answers").insertOne(answer);
+      let numberOfEntries = await getNumberOfEntries();
+      console.log(numberOfEntries);
+      io.emit("top_list", numberOfEntries);
+    } else {
+      io.emit("wrong_answer", answer.userName);
     }
+  });
+
+  socket.on("chat_message", (message) => {
+    io.emit("chat_message", message);
+    // Save message to database
+    db.collection("messages").insertOne(message);
   });
 });
 
@@ -37,6 +53,18 @@ app.use(cors());
 
 // Serve static files
 app.use(express.static("../frontend"));
+
+// Route to get all messages from database
+app.get("/messages", async (req, res) => {
+  const messages = await getMessages();
+  res.send(messages);
+});
+
+// Route to get all answers from database
+app.get("/answers", async (req, res) => {
+  const answers = await getAnswers();
+  res.send(answers);
+});
 
 server.listen(port, () => {
   console.log(
@@ -74,15 +102,44 @@ function randomNumber(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// Calculate number of entries for each user
-function getNumberOfEntries(answers) {
-  const userNames = answers.map((answer) => answer.userName);
-  const uniqueUserNames = [...new Set(userNames)];
-  const numberOfEntries = uniqueUserNames.map((userName) => {
-    const userAnswers = answers.filter(
-      (answer) => answer.userName === userName
-    );
-    return userAnswers.length;
-  });
+// Creates an object with the name and number of correct answers for each player
+async function getNumberOfEntries() {
+  // Ser answers to all answers in database
+  let answers = await db.collection("answers").find({}).toArray();
+  let numberOfEntries = [];
+  // Get unique names
+  let uniqueNames = answers
+    .map((answer) => answer.userName)
+    .filter((name, index, self) => self.indexOf(name) === index);
+  // Loop through unique names
+  for (let i = 0; i < uniqueNames.length; i++) {
+    // Get number of correct answers for each name
+    let numberOfCorrectAnswers = answers.filter(
+      (answer) => answer.userName === uniqueNames[i]
+    ).length;
+    // Create object with name and number of correct answers
+    numberOfEntries.push({
+      userName: uniqueNames[i],
+      numberOfCorrectAnswers: numberOfCorrectAnswers,
+    });
+  }
+
+  // Sort the array by number of correct answers
+  numberOfEntries.sort(
+    (a, b) => b.numberOfCorrectAnswers - a.numberOfCorrectAnswers
+  );
+
   return numberOfEntries;
+}
+
+// Get all messages
+async function getMessages() {
+  const messages = await db.collection("messages").find({}).toArray();
+  return messages;
+}
+
+// Get all answers
+async function getAnswers() {
+  const answers = await db.collection("answers").find({}).toArray();
+  return answers;
 }
